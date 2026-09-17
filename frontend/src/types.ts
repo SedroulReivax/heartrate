@@ -8,5 +8,6 @@ export interface rPPGState {
     signal: number[];
     spectrum: {freq: number, mag: number}[];
     confidence: number;
-    frame: string | null;
+    frame_original: string | null;
+    frame_amplified: string | null;
 }

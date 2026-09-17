@@ -23,62 +23,65 @@ function App() {
                 
                 {/* Left Column */}
                 <div className="lg:col-span-1 flex flex-col gap-4">
-                    {/* Camera Feed */}
+                    {/* Camera Feed Comparison */}
                     <div className="border border-[#1a4a1a] p-2">
-                        <h2 className="mb-2 border-b border-[#1a4a1a] pb-1">CAMERA FEED</h2>
-                        <div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden">
-                            {data?.frame ? (
-                                <img src={data.frame} alt="Webcam Feed" className="w-full h-full object-cover grayscale sepia hue-rotate-50 saturate-200" />
-                            ) : (
-                                <div className="text-[#005c18]">WAITING FOR SIGNAL...</div>
-                            )}
+                        <h2 className="mb-2 border-b border-[#1a4a1a] pb-1">CAMERA FEEDS (ORIGINAL vs EVM)</h2>
+                        <div className="flex flex-col gap-2">
+                            <div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden">
+                                {data?.frame_original ? (
+                                    <img src={data.frame_original} alt="Original Feed" className="w-full h-full object-cover grayscale sepia hue-rotate-50 saturate-200" />
+                                ) : (
+                                    <div className="text-[#005c18]">WAITING FOR SIGNAL...</div>
+                                )}
+                                <div className="absolute top-1 left-1 bg-black/50 px-1 text-xs">RAW</div>
+                            </div>
+                            <div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden">
+                                {data?.frame_amplified ? (
+                                    <img src={data.frame_amplified} alt="EVM Amplified Feed" className="w-full h-full object-cover" />
+                                ) : (
+                                    <div className="text-[#005c18]">WAITING FOR SIGNAL...</div>
+                                )}
+                                <div className="absolute top-1 left-1 bg-black/50 px-1 text-xs">AMPLIFIED</div>
+                            </div>
                         </div>
                         <p className="text-xs text-[#00ff41] mt-2 animate-pulse">
                             ALIGN YOUR FACE WITH THE GREEN BOXES
                         </p>
                         <p className="text-xs text-[#005c18] mt-1">
-                            Tracking: forehead + upper cheek regions.
+                            Tracking: forehead + upper cheek regions. The amplified feed isolates and enhances subtle green color variations caused by blood flow.
                         </p>
                     </div>
 
                     {/* Pipeline Status */}
                     <div className="border border-[#1a4a1a] p-2 flex-grow">
                         <h2 className="mb-2 border-b border-[#1a4a1a] pb-1">PIPELINE STATUS</h2>
-                        <ul className="space-y-2">
-                            <li className="flex items-start gap-2">
-                                <span>[{data?.face_detected ? '✓' : ' '}]</span>
-                                <div>
-                                    <div>Face detected</div>
-                                    <div className="text-xs text-[#005c18]">MediaPipe locates facial landmarks.</div>
-                                </div>
+                        <ul className="text-sm space-y-2 mt-2">
+                            <li className={data?.face_detected ? 'text-[#00ff41]' : 'text-[#005c18]'}>
+                                [{data?.face_detected ? '✓' : ' '}] 01. STATIC ROI LOCKED
                             </li>
-                            <li className="flex items-start gap-2">
-                                <span>[{data?.face_detected ? '✓' : ' '}]</span>
-                                <div>
-                                    <div>ROI locked</div>
-                                    <div className="text-xs text-[#005c18]">Forehead and cheek polygon coordinates extracted.</div>
-                                </div>
+                            <li className={data?.face_detected ? 'text-[#00ff41]' : 'text-[#005c18]'}>
+                                [{data?.face_detected ? '✓' : ' '}] 02. EVM SPATIAL BLUR & DOWN-SAMPLING
                             </li>
-                            <li className="flex items-start gap-2">
-                                <span>[{data?.is_ready ? '✓' : (data?.face_detected ? '~' : ' ')}]</span>
-                                <div className="w-full">
-                                    <div className="flex justify-between">
-                                        <span>Buffering signal...</span>
-                                        {data?.face_detected && !data?.is_ready && (
-                                            <span>{Math.round((data?.progress || 0) * 100)}%</span>
-                                        )}
-                                    </div>
-                                    <div className="text-xs text-[#005c18]">We need ~10s of data to build a meaningful waveform.</div>
-                                </div>
+                            <li className={data?.face_detected ? 'text-[#00ff41]' : 'text-[#005c18]'}>
+                                [{data?.face_detected ? '✓' : ' '}] 03. TEMPORAL BUFFERING
                             </li>
-                            <li className="flex items-start gap-2">
-                                <span>[{data?.is_ready ? '✓' : ' '}]</span>
-                                <div>
-                                    <div>Filtering & FFT</div>
-                                    <div className="text-xs text-[#005c18]">Bandpass filter + Fast Fourier Transform.</div>
-                                </div>
+                            <li className={data?.is_ready ? 'text-[#00ff41]' : 'text-[#005c18]'}>
+                                [{data?.is_ready ? '✓' : ' '}] 04. IIR BANDPASS FILTER & SIGNAL AMPLIFICATION
+                            </li>
+                            <li className={data?.bpm && data.bpm > 0 ? 'text-[#00ff41]' : 'text-[#005c18]'}>
+                                [{data?.bpm && data.bpm > 0 ? '✓' : ' '}] 05. FFT PEAK EXTRACTION
                             </li>
                         </ul>
+                        
+                        {!data?.is_ready && data?.face_detected && (
+                            <div className="mt-4">
+                                <div className="flex justify-between text-[#00ff41]">
+                                    <span>Buffering signal...</span>
+                                    <span>{Math.round((data?.progress || 0) * 100)}%</span>
+                                </div>
+                                <div className="text-xs text-[#005c18]">We need ~10s of data to build a meaningful waveform.</div>
+                            </div>
+                        )}
                     </div>
                 </div>
 
