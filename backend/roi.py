@@ -108,15 +108,22 @@ class FaceROIExtractor:
             (rc_x, rc_y, rc_w, rc_h),
         ]
 
-        green_sum = 0
-        pixel_count = 0
+
+        # Collect all 3 channels for POS algorithm
+        r_sum = g_sum = b_sum = 0.0
+        pixel_count2 = 0
         for (rx, ry, rw, rh) in rois:
             rw = min(rw, iw - rx)
             rh = min(rh, ih - ry)
             if rw > 0 and rh > 0:
                 roi_region = frame[ry:ry+rh, rx:rx+rw]
-                green_sum += np.sum(roi_region[:, :, 1].astype(np.float64))
-                pixel_count += rw * rh
+                b_sum += np.sum(roi_region[:, :, 0].astype(np.float64))
+                g_sum += np.sum(roi_region[:, :, 1].astype(np.float64))
+                r_sum += np.sum(roi_region[:, :, 2].astype(np.float64))
+                pixel_count2 += rw * rh
 
-        avg_green = float(green_sum) / pixel_count if pixel_count > 0 else 0.0
-        return True, rois, avg_green
+        if pixel_count2 == 0:
+            return True, rois, (0.0, 0.0, 0.0)
+
+        avg_rgb = (r_sum / pixel_count2, g_sum / pixel_count2, b_sum / pixel_count2)
+        return True, rois, avg_rgb

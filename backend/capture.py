@@ -54,12 +54,12 @@ class CaptureSession:
                 amplified_frame = self.evm.process_frame(frame)
 
                 # --- rPPG signal from static ROIs ---
-                face_found, rois, avg_green = self.roi_extractor.process_frame(frame)
+                face_found, rois, avg_rgb = self.roi_extractor.process_frame(frame)
 
                 state = {
                     "face_detected": face_found,
                     "rois": [list(r) for r in rois],
-                    "avg_green": float(avg_green),
+                    "avg_green": float(avg_rgb[1]) if face_found else 0.0,
                     "is_ready": False,
                     "progress": 0.0,
                     "bpm": 0.0,
@@ -71,7 +71,7 @@ class CaptureSession:
                 }
 
                 if face_found:
-                    is_ready, bpm, sig, spec, conf = self.signal_processor.process(avg_green)
+                    is_ready, bpm, sig, spec, conf = self.signal_processor.process(avg_rgb)
                     state.update({
                         "is_ready": is_ready,
                         "bpm": round(float(bpm), 1),
@@ -81,7 +81,9 @@ class CaptureSession:
                         "progress": float(conf),
                     })
                 else:
-                    self.signal_processor.signal_buffer = []
+                    self.signal_processor.r_buf = []
+                    self.signal_processor.g_buf = []
+                    self.signal_processor.b_buf = []
 
                 # Draw ROI boxes on the original frame
                 for (x, y, w, h) in rois:
