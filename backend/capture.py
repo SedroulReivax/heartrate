@@ -14,6 +14,9 @@ class CaptureSession:
         self.cap.set(cv2.CAP_PROP_FPS, fps)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+        
+        # ATTEMPT TO DISABLE AUTO-EXPOSURE (0.25 usually means manual in MSMF/DSHOW)
+        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
 
         # Use actual FPS reported by the driver (could be 15, 25, 30…)
         actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
@@ -40,12 +43,27 @@ class CaptureSession:
 
         print(f"Camera opened @ {self.fps:.1f} fps")
 
+        fail_count = 0
         try:
             while self.is_running:
                 ret, frame = self.cap.read()
                 if not ret:
-                    await asyncio.sleep(0.05)
+                    fail_count += 1
+                    if fail_count > 10:
+                        print("Camera crashed. Hard restarting...")
+                        self.cap.release()
+                        await asyncio.sleep(0.5)
+                        self.cap = cv2.VideoCapture(0)
+                        self.cap.set(cv2.CAP_PROP_FPS, self.fps)
+                        self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                        self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                        self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+                        fail_count = 0
+                    else:
+                        await asyncio.sleep(0.05)
                     continue
+
+                fail_count = 0
 
                 # Mirror for natural webcam feel
                 frame = cv2.flip(frame, 1)

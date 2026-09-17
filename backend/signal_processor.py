@@ -44,8 +44,20 @@ class SignalProcessor:
         return pulse
 
     def _extract_robust_bpm(self, rppg_signal):
-        # 1. Detrend to remove slow physiological drift
-        sig_detrended = signal.detrend(rppg_signal)
+        # 1. Smoothness Priors Detrending (Tarvainen et al., 2002)
+        # Outstanding non-linear detrending for rPPG. Lambda ~150 removes < 0.6 Hz drift at 30 FPS.
+        N = len(rppg_signal)
+        if N > 4:
+            lam = 150.0 
+            import scipy.sparse as sp
+            from scipy.sparse.linalg import spsolve
+            I = sp.eye(N, format='csc')
+            D2 = sp.diags([1, -2, 1], [0, 1, 2], shape=(N - 2, N), format='csc')
+            A = I + (lam ** 2) * (D2.T @ D2)
+            trend = spsolve(A, rppg_signal)
+            sig_detrended = rppg_signal - trend
+        else:
+            sig_detrended = signal.detrend(rppg_signal)
         
         # 2. Zero-phase Bandpass (no edge shift artifacts like lfilter)
         nyq = 0.5 * self.target_fps
@@ -130,30 +142,20 @@ class SignalProcessor:
             progress = duration / target_duration
             return False, 0.0, [], [], progress
 
-        # --- Interpolate to strict target_fps grid ---
+        # Compute POS on raw, un-interpolated RGB traces first
+        pulse_raw = self._pos_signal(self.r_buf, self.g_buf, self.b_buf)
+
+        # Now interpolate the 1D POS pulse to a strict target_fps grid
         t_start, t_end = self.times[0], self.times[-1]
         uniform_t = np.arange(t_start, t_end, 1.0 / self.target_fps)
         
-        # Need at least 4 points for cubic interpolation
         if len(self.times) < 4:
             return False, 0.0, [], [], 0.0
 
         try:
-            interp_r = interp1d(self.times, self.r_buf, kind='cubic', fill_value='extrapolate')(uniform_t)
-            interp_g = interp1d(self.times, self.g_buf, kind='cubic', fill_value='extrapolate')(uniform_t)
-            interp_b = interp1d(self.times, self.b_buf, kind='cubic', fill_value='extrapolate')(uniform_t)
+            pulse = interp1d(self.times, pulse_raw, kind='cubic', fill_value='extrapolate')(uniform_t)
         except ValueError:
-            # Fallback to linear if cubic fails (e.g., duplicate timestamps)
-            interp_r = interp1d(self.times, self.r_buf, kind='linear', fill_value='extrapolate')(uniform_t)
-            interp_g = interp1d(self.times, self.g_buf, kind='linear', fill_value='extrapolate')(uniform_t)
-            interp_b = interp1d(self.times, self.b_buf, kind='linear', fill_value='extrapolate')(uniform_t)
-
-        # Ensure we have enough interpolated points
-        if len(uniform_t) < self.target_fps * 3:
-            return False, 0.0, [], [], 1.0
-
-        # Compute POS on strictly uniform grid
-        pulse = self._pos_signal(interp_r, interp_g, interp_b)
+            pulse = interp1d(self.times, pulse_raw, kind='linear', fill_value='extrapolate')(uniform_t)
 
         # Extract BPM robustly
         bpm, snr_db, sig_filtered, valid_freqs, valid_psd = self._extract_robust_bpm(pulse)
