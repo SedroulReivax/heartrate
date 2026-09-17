@@ -29,7 +29,7 @@ function App() {
                         <div className="flex flex-col gap-2">
                             <div className="aspect-video bg-black flex items-center justify-center relative overflow-hidden">
                                 {data?.frame_original ? (
-                                    <img src={data.frame_original} alt="Original Feed" className="w-full h-full object-cover grayscale sepia hue-rotate-50 saturate-200" />
+                                    <img src={data.frame_original} alt="Original Feed" className="w-full h-full object-cover" />
                                 ) : (
                                     <div className="text-[#005c18]">WAITING FOR SIGNAL...</div>
                                 )}
