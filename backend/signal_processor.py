@@ -28,20 +28,40 @@ class SignalProcessor:
 
     def _pos_signal(self, r, g, b):
         r, g, b = np.array(r), np.array(g), np.array(b)
-        mu_r = np.mean(r) + 1e-9
-        mu_g = np.mean(g) + 1e-9
-        mu_b = np.mean(b) + 1e-9
+        N = len(r)
+        
+        # Original POS overlap-add (OLA) window length: 1.6 seconds
+        L = int(1.6 * self.target_fps)
+        if N <= L:
+            L = N
+            
+        H = np.zeros(N)
+        
+        # Overlap-Add (OLA) process
+        for n in range(N - L + 1):
+            rw = r[n:n+L]
+            gw = g[n:n+L]
+            bw = b[n:n+L]
+            
+            mu_r = np.mean(rw) + 1e-9
+            mu_g = np.mean(gw) + 1e-9
+            mu_b = np.mean(bw) + 1e-9
 
-        Rn = r / mu_r
-        Gn = g / mu_g
-        Bn = b / mu_b
+            Rn = rw / mu_r
+            Gn = gw / mu_g
+            Bn = bw / mu_b
 
-        S1 = Rn - Gn
-        S2 = Rn + Gn - 2.0 * Bn
+            S1 = Rn - Gn
+            S2 = Rn + Gn - 2.0 * Bn
 
-        alpha = np.std(S1) / (np.std(S2) + 1e-9)
-        pulse = S1 + alpha * S2
-        return pulse
+            alpha = np.std(S1) / (np.std(S2) + 1e-9)
+            pulse_window = S1 + alpha * S2
+            
+            # Zero-mean the window before adding
+            pulse_window -= np.mean(pulse_window)
+            H[n:n+L] += pulse_window
+            
+        return H
 
     def _extract_robust_bpm(self, rppg_signal):
         # 1. Smoothness Priors Detrending (Tarvainen et al., 2002)
