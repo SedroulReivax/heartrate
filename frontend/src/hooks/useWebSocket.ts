@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { rPPGState } from '../types';
+import type { rPPGState } from '../types';
 
 export const useWebSocket = (url: string) => {
     const [data, setData] = useState<rPPGState | null>(null);

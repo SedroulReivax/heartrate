@@ -33,8 +33,11 @@ function App() {
                                 <div className="text-[#005c18]">WAITING FOR SIGNAL...</div>
                             )}
                         </div>
-                        <p className="text-xs text-[#005c18] mt-2">
-                            Tracking: forehead + upper cheek region. These areas have the highest density of superficial capillaries.
+                        <p className="text-xs text-[#00ff41] mt-2 animate-pulse">
+                            ALIGN YOUR FACE WITH THE GREEN BOXES
+                        </p>
+                        <p className="text-xs text-[#005c18] mt-1">
+                            Tracking: forehead + upper cheek regions.
                         </p>
                     </div>
 

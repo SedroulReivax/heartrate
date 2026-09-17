@@ -1,33 +1,19 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 import asyncio
+import websockets
 import json
 from capture import CaptureSession
 
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    
+async def handler(websocket):
+    print("Client connected")
     queue = asyncio.Queue(maxsize=2)
     session = CaptureSession()
-    
     capture_task = asyncio.create_task(session.run_loop(queue))
     
     try:
         while True:
             state = await queue.get()
-            await websocket.send_text(json.dumps(state))
-    except WebSocketDisconnect:
+            await websocket.send(json.dumps(state))
+    except websockets.exceptions.ConnectionClosed:
         print("Client disconnected")
     except Exception as e:
         print(f"WebSocket error: {e}")
@@ -36,6 +22,10 @@ async def websocket_endpoint(websocket: WebSocket):
         if not capture_task.done():
             capture_task.cancel()
 
+async def main():
+    async with websockets.serve(handler, "0.0.0.0", 8000):
+        print("WebSocket server started on ws://localhost:8000")
+        await asyncio.Future()  # run forever
+
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    asyncio.run(main())
