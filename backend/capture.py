@@ -1,6 +1,7 @@
 import cv2
 import asyncio
 import base64
+import time
 from roi import FaceROIExtractor
 from signal_processor import SignalProcessor
 from evm import EulerianMagnifier
@@ -71,7 +72,8 @@ class CaptureSession:
                 }
 
                 if face_found:
-                    is_ready, bpm, sig, spec, conf = self.signal_processor.process(avg_rgb)
+                    now = time.perf_counter()
+                    is_ready, bpm, sig, spec, conf = self.signal_processor.process(avg_rgb, now)
                     state.update({
                         "is_ready": is_ready,
                         "bpm": round(float(bpm), 1),

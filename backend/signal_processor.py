@@ -1,147 +1,169 @@
 import numpy as np
-from scipy.signal import butter, lfilter, detrend
+import scipy.signal as signal
+from scipy.interpolate import interp1d
 
 class SignalProcessor:
     """
-    Implements the POS (Plane Orthogonal to Skin) rPPG algorithm.
-    
-    Reference: W. Wang et al., "Algorithmic Principles of Remote PPG," 
-    IEEE Trans. Biomedical Engineering, 2017.
-    
-    Instead of using a raw single green channel (which is easily polluted 
-    by lighting), POS projects the RGB signal onto a plane orthogonal to 
-    the skin-tone vector, mathematically cancelling illumination noise.
-    This is why it matches your actual pulse far better.
+    Robust rPPG Signal Processor implementing SOTA practices:
+    1. Cubic Spline Interpolation for exact 30Hz resampling (fixes webcam FPS jitter).
+    2. POS (Plane Orthogonal to Skin) algorithm for lighting noise cancellation.
+    3. Zero-phase filtering (filtfilt) to avoid time-domain edge artifacts.
+    4. Zero-padded FFT with Hann window to prevent spectral leakage.
+    5. De Haan's SNR peak selection (including harmonics) to avoid false BPM spikes.
     """
 
-    def __init__(self, fps=30, buffer_size=300):
-        self.fps = fps
-        # Use a shorter 6s window for faster, more responsive readings
-        self.buffer_size = min(buffer_size, int(fps * 6))
+    def __init__(self, target_fps=30.0, buffer_seconds=6):
+        self.target_fps = float(target_fps)
+        self.buffer_size = int(self.target_fps * buffer_seconds)
         
-        # Ring buffers for each RGB channel
+        self.times = []
         self.r_buf = []
         self.g_buf = []
         self.b_buf = []
 
-        self.lowcut  = 0.75   # 45 BPM
-        self.highcut = 3.0    # 180 BPM
+        self.min_hz = 0.75  # 45 BPM
+        self.max_hz = 3.0   # 180 BPM
         
-        # SNR gate: peak must be this many times the noise floor
-        # Tuned from academic benchmarks: 3.5 is a safe threshold for POS
-        self.SNR_THRESHOLD = 3.5
-
-    def _bandpass(self, data):
-        nyq = 0.5 * self.fps
-        low  = max(self.lowcut  / nyq, 0.01)
-        high = min(self.highcut / nyq, 0.99)
-        b, a = butter(3, [low, high], btype='band')
-        return lfilter(b, a, data)
+        self.SNR_THRESHOLD_DB = 2.0 # Minimum SNR in dB to report a confident BPM
 
     def _pos_signal(self, r, g, b):
-        """
-        Compute the POS pulse signal from RGB time series.
-        
-        POS projects onto a plane orthogonal to the skin colour direction.
-        This cancels specular reflections and illumination changes, leaving 
-        only the pulsatile blood volume signal.
-        
-        Steps (following Wang et al. 2017, Algorithm 1):
-        1. Normalise each channel by its mean to remove absolute brightness.
-        2. Project onto two orthogonal directions in the normalised colour space.
-        3. Combine the two projections to cancel the skin-tone direction.
-        """
         r, g, b = np.array(r), np.array(g), np.array(b)
-
-        # Step 1 — per-channel normalisation (removes DC / brightness)
         mu_r = np.mean(r) + 1e-9
         mu_g = np.mean(g) + 1e-9
         mu_b = np.mean(b) + 1e-9
 
-        Rn = r / mu_r   # normalised red
-        Gn = g / mu_g   # normalised green
-        Bn = b / mu_b   # normalised blue
+        Rn = r / mu_r
+        Gn = g / mu_g
+        Bn = b / mu_b
 
-        # Step 2 — two projection axes orthogonal to the skin tone (1,1,1)
-        # (from the POS paper: eqs 6-7)
-        S1 = Rn - Gn             # axis 1
-        S2 = Rn + Gn - 2.0 * Bn  # axis 2
+        S1 = Rn - Gn
+        S2 = Rn + Gn - 2.0 * Bn
 
-        # Step 3 — combine to cancel residual skin tone
-        # alpha = std(S1)/std(S2) tunes the mix
         alpha = np.std(S1) / (np.std(S2) + 1e-9)
         pulse = S1 + alpha * S2
-
         return pulse
 
-    def process(self, rgb_triple):
-        """
-        rgb_triple: (avg_r, avg_g, avg_b) from the ROI this frame.
+    def _extract_robust_bpm(self, rppg_signal):
+        # 1. Detrend to remove slow physiological drift
+        sig_detrended = signal.detrend(rppg_signal)
         
-        Returns (is_ready, bpm, filtered_signal, spectrum, confidence)
+        # 2. Zero-phase Bandpass (no edge shift artifacts like lfilter)
+        nyq = 0.5 * self.target_fps
+        b, a = signal.butter(3, [self.min_hz / nyq, self.max_hz / nyq], btype='bandpass')
+        # Use filtfilt (applies filter forward and backward to cancel phase delay)
+        # padding bounds to prevent edge artifacts
+        sig_filtered = signal.filtfilt(b, a, sig_detrended, padlen=min(len(sig_detrended)-1, 15))
+        
+        # 3. Apply Hann window to reduce spectral leakage
+        window = np.hanning(len(sig_filtered))
+        sig_windowed = sig_filtered * window
+        
+        # 4. Zero-padded Periodogram (nfft=2048 for smooth sub-Hz interpolation)
+        freqs, psd = signal.periodogram(sig_windowed, fs=self.target_fps, nfft=2048, window=None)
+        
+        # 5. Isolate physiological range
+        valid_idx = np.where((freqs >= self.min_hz) & (freqs <= self.max_hz))[0]
+        if len(valid_idx) == 0:
+            return 0.0, 0.0, sig_filtered, freqs, psd
+
+        valid_freqs = freqs[valid_idx]
+        valid_psd = psd[valid_idx]
+        
+        peaks, _ = signal.find_peaks(valid_psd)
+        
+        if len(peaks) == 0:
+            best_freq = valid_freqs[np.argmax(valid_psd)]
+            return best_freq * 60.0, 0.0, sig_filtered, valid_freqs, valid_psd
+
+        candidate_freqs = valid_freqs[peaks]
+        
+        # 6. Evaluate De Haan SNR for each candidate peak (including its harmonic)
+        best_snr_linear = -np.inf
+        best_freq = None
+        window_hz = 0.1 # +/- 0.1 Hz window around peak
+        
+        physio_mask = (freqs >= self.min_hz) & (freqs <= self.max_hz)
+        p_total = np.sum(psd[physio_mask])
+        
+        for fc in candidate_freqs:
+            mask_fundamental = (freqs >= (fc - window_hz)) & (freqs <= (fc + window_hz))
+            mask_harmonic = (freqs >= (2*fc - window_hz)) & (freqs <= (2*fc + window_hz))
+            
+            signal_mask = mask_fundamental | mask_harmonic
+            p_signal = np.sum(psd[signal_mask & physio_mask])
+            
+            p_noise = p_total - p_signal
+            p_noise = max(p_noise, 1e-10)
+                
+            snr_linear = p_signal / p_noise
+            if snr_linear > best_snr_linear:
+                best_snr_linear = snr_linear
+                best_freq = fc
+                
+        snr_db = 10 * np.log10(best_snr_linear) if best_snr_linear > 0 else 0
+        bpm = best_freq * 60.0
+        
+        return bpm, snr_db, sig_filtered, valid_freqs, valid_psd
+
+    def process(self, rgb_triple, timestamp):
         """
-        r_val, g_val, b_val = rgb_triple
+        rgb_triple: (r, g, b) floats
+        timestamp: Exact arrival time in seconds (e.g. time.perf_counter())
+        """
+        self.r_buf.append(rgb_triple[0])
+        self.g_buf.append(rgb_triple[1])
+        self.b_buf.append(rgb_triple[2])
+        self.times.append(timestamp)
 
-        self.r_buf.append(r_val)
-        self.g_buf.append(g_val)
-        self.b_buf.append(b_val)
-
-        if len(self.r_buf) > self.buffer_size:
+        # We keep data by time, not strict frame count
+        # Ensure we have at least 6 seconds of data
+        while len(self.times) > 10 and (self.times[-1] - self.times[0]) > (self.buffer_size / self.target_fps) + 1.0:
             self.r_buf.pop(0)
             self.g_buf.pop(0)
             self.b_buf.pop(0)
+            self.times.pop(0)
 
-        n = len(self.r_buf)
+        duration = self.times[-1] - self.times[0] if len(self.times) > 0 else 0
+        target_duration = self.buffer_size / self.target_fps
 
-        if n < self.buffer_size:
-            progress = n / self.buffer_size
-            # Show partial POS signal for waveform visualisation
-            if n > 10:
-                raw = self._pos_signal(self.r_buf, self.g_buf, self.b_buf)
-                raw = detrend(raw)
-                return False, 0.0, raw.tolist(), [], progress
+        if duration < target_duration * 0.95:
+            progress = duration / target_duration
             return False, 0.0, [], [], progress
 
-        # --- Full buffer: compute POS signal ---
-        pulse = self._pos_signal(self.r_buf, self.g_buf, self.b_buf)
+        # --- Interpolate to strict target_fps grid ---
+        t_start, t_end = self.times[0], self.times[-1]
+        uniform_t = np.arange(t_start, t_end, 1.0 / self.target_fps)
+        
+        # Need at least 4 points for cubic interpolation
+        if len(self.times) < 4:
+            return False, 0.0, [], [], 0.0
 
-        # Proper linear detrend (removes slow lighting drift better than mean-sub)
-        pulse = detrend(pulse)
+        try:
+            interp_r = interp1d(self.times, self.r_buf, kind='cubic', fill_value='extrapolate')(uniform_t)
+            interp_g = interp1d(self.times, self.g_buf, kind='cubic', fill_value='extrapolate')(uniform_t)
+            interp_b = interp1d(self.times, self.b_buf, kind='cubic', fill_value='extrapolate')(uniform_t)
+        except ValueError:
+            # Fallback to linear if cubic fails (e.g., duplicate timestamps)
+            interp_r = interp1d(self.times, self.r_buf, kind='linear', fill_value='extrapolate')(uniform_t)
+            interp_g = interp1d(self.times, self.g_buf, kind='linear', fill_value='extrapolate')(uniform_t)
+            interp_b = interp1d(self.times, self.b_buf, kind='linear', fill_value='extrapolate')(uniform_t)
 
-        # Bandpass filter
-        filtered = self._bandpass(pulse)
+        # Ensure we have enough interpolated points
+        if len(uniform_t) < self.target_fps * 3:
+            return False, 0.0, [], [], 1.0
 
-        # FFT with Hamming window
-        N = len(filtered)
-        windowed = filtered * np.hamming(N)
-        fft_mag  = np.abs(np.fft.rfft(windowed))
-        freqs    = np.fft.rfftfreq(N, 1.0 / self.fps)
+        # Compute POS on strictly uniform grid
+        pulse = self._pos_signal(interp_r, interp_g, interp_b)
 
-        valid_mask    = (freqs >= self.lowcut) & (freqs <= self.highcut)
-        valid_indices = np.where(valid_mask)[0]
+        # Extract BPM robustly
+        bpm, snr_db, sig_filtered, valid_freqs, valid_psd = self._extract_robust_bpm(pulse)
 
-        if len(valid_indices) == 0:
-            return True, 0.0, filtered.tolist(), [], 0.0
+        spectrum = [{"freq": float(f), "mag": float(m)} for f, m in zip(valid_freqs, valid_psd)]
 
-        valid_mags  = fft_mag[valid_indices]
-        valid_freqs = freqs[valid_indices]
+        if snr_db < self.SNR_THRESHOLD_DB:
+            return True, 0.0, sig_filtered.tolist(), spectrum, 0.0
 
-        peak_idx  = np.argmax(valid_mags)
-        peak_freq = valid_freqs[peak_idx]
-        peak_mag  = valid_mags[peak_idx]
+        # Confidence scaled roughly 0 to 1 based on SNR dB (2dB to ~8dB max)
+        confidence = min(max((snr_db - self.SNR_THRESHOLD_DB) / 6.0, 0.0), 1.0)
 
-        # --- SNR gate ---
-        others      = np.delete(valid_mags, peak_idx)
-        noise_floor = np.mean(others) if len(others) > 0 else 1e-9
-        snr         = peak_mag / (noise_floor + 1e-9)
-
-        spectrum = [{"freq": float(f), "mag": float(m)}
-                    for f, m in zip(valid_freqs, valid_mags)]
-
-        if snr < self.SNR_THRESHOLD:
-            return True, 0.0, filtered.tolist(), spectrum, 0.0
-
-        bpm        = peak_freq * 60.0
-        confidence = min(snr / 10.0, 1.0)
-
-        return True, bpm, filtered.tolist(), spectrum, confidence
+        return True, bpm, sig_filtered.tolist(), spectrum, confidence
