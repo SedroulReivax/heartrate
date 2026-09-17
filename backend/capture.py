@@ -21,7 +21,7 @@ class CaptureSession:
             self.fps = actual_fps
 
         self.roi_extractor = FaceROIExtractor()
-        self.signal_processor = SignalProcessor(fps=self.fps, buffer_size=int(self.fps * 10))
+        self.signal_processor = SignalProcessor(target_fps=self.fps, buffer_seconds=6)
         self.evm = EulerianMagnifier(fps=self.fps)
         self.is_running = False
 
