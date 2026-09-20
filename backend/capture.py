@@ -24,7 +24,7 @@ class CaptureSession:
             self.fps = actual_fps
 
         self.roi_extractor = FaceROIExtractor()
-        self.signal_processor = SignalProcessor(target_fps=self.fps, buffer_seconds=6)
+        self.signal_processor = SignalProcessor(target_fps=self.fps, buffer_seconds=10)
         self.evm = EulerianMagnifier(fps=self.fps)
         self.is_running = False
 
@@ -101,9 +101,7 @@ class CaptureSession:
                         "progress": float(conf),
                     })
                 else:
-                    self.signal_processor.r_buf = []
-                    self.signal_processor.g_buf = []
-                    self.signal_processor.b_buf = []
+                    self.signal_processor.reset()
 
                 # Draw ROI boxes on the original frame
                 for (x, y, w, h) in rois:

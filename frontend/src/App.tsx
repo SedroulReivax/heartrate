@@ -51,38 +51,6 @@ function App() {
                             Tracking: forehead + upper cheek regions. The amplified feed isolates and enhances subtle green color variations caused by blood flow.
                         </p>
                     </div>
-
-                    {/* Pipeline Status */}
-                    <div className="border border-[#1a4a1a] p-2 flex-grow">
-                        <h2 className="mb-2 border-b border-[#1a4a1a] pb-1">PIPELINE STATUS</h2>
-                        <ul className="text-sm space-y-2 mt-2">
-                            <li className={data?.face_detected ? 'text-[#00ff41]' : 'text-[#005c18]'}>
-                                [{data?.face_detected ? '✓' : ' '}] 01. STATIC ROI LOCKED
-                            </li>
-                            <li className={data?.face_detected ? 'text-[#00ff41]' : 'text-[#005c18]'}>
-                                [{data?.face_detected ? '✓' : ' '}] 02. EVM SPATIAL BLUR & DOWN-SAMPLING
-                            </li>
-                            <li className={data?.face_detected ? 'text-[#00ff41]' : 'text-[#005c18]'}>
-                                [{data?.face_detected ? '✓' : ' '}] 03. TEMPORAL BUFFERING
-                            </li>
-                            <li className={data?.is_ready ? 'text-[#00ff41]' : 'text-[#005c18]'}>
-                                [{data?.is_ready ? '✓' : ' '}] 04. IIR BANDPASS FILTER & SIGNAL AMPLIFICATION
-                            </li>
-                            <li className={data?.bpm && data.bpm > 0 ? 'text-[#00ff41]' : 'text-[#005c18]'}>
-                                [{data?.bpm && data.bpm > 0 ? '✓' : ' '}] 05. FFT PEAK EXTRACTION
-                            </li>
-                        </ul>
-                        
-                        {!data?.is_ready && data?.face_detected && (
-                            <div className="mt-4">
-                                <div className="flex justify-between text-[#00ff41]">
-                                    <span>Buffering signal...</span>
-                                    <span>{Math.round((data?.progress || 0) * 100)}%</span>
-                                </div>
-                                <div className="text-xs text-[#005c18]">We need ~10s of data to build a meaningful waveform.</div>
-                            </div>
-                        )}
-                    </div>
                 </div>
 
                 {/* Right Column */}
@@ -94,14 +62,19 @@ function App() {
                             <div className="text-6xl font-bold text-[#39ff14]">
                                 {data?.is_ready ? data.bpm : '--'} <span className="text-2xl text-[#00ff41]">BPM</span>
                             </div>
+                            {!data?.is_ready && data?.face_detected && (
+                                <div className="text-xs text-[#005c18] mt-1">
+                                    Buffering signal... {Math.round((data?.progress || 0) * 100)}%
+                                </div>
+                            )}
                         </div>
                         <div className="text-right flex flex-col gap-1">
                             <div>
-                                Confidence: <span className="text-[#39ff14]">{data?.confidence.toFixed(1) || 0}%</span>
+                                Confidence: <span className="text-[#39ff14]">{((data?.confidence || 0) * 100).toFixed(1)}%</span>
                             </div>
                             <div>
-                                Status: <span className={data?.is_ready ? (data.confidence > 60 ? 'text-[#39ff14]' : 'text-yellow-500') : 'text-[#005c18]'}>
-                                    {data?.is_ready ? (data.confidence > 60 ? 'STABLE' : 'UNSTABLE') : (data?.face_detected ? 'BUFFERING' : 'LOST')}
+                                Status: <span className={data?.is_ready ? (data.confidence > 0.6 ? 'text-[#39ff14]' : 'text-yellow-500') : 'text-[#005c18]'}>
+                                    {data?.is_ready ? (data.confidence > 0.6 ? 'STABLE' : 'UNSTABLE') : (data?.face_detected ? 'BUFFERING' : 'LOST')}
                                 </span>
                             </div>
                         </div>

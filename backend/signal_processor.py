@@ -26,11 +26,18 @@ class SignalProcessor:
         
         self.SNR_THRESHOLD_DB = 2.0 # Minimum SNR in dB to report a confident BPM
 
+    def reset(self):
+        """Clear all buffers together so times/r/g/b never desync (e.g. on face loss)."""
+        self.times = []
+        self.r_buf = []
+        self.g_buf = []
+        self.b_buf = []
+
     def _pos_signal(self, r, g, b):
         r, g, b = np.array(r), np.array(g), np.array(b)
         N = len(r)
         
-        # Original POS overlap-add (OLA) window length: 1.6 seconds
+        # Wang et al. POS overlap-add (OLA) window length: 1.6 seconds.
         L = int(1.6 * self.target_fps)
         if N <= L:
             L = N
@@ -51,8 +58,10 @@ class SignalProcessor:
             Gn = gw / mu_g
             Bn = bw / mu_b
 
-            S1 = Rn - Gn
-            S2 = Rn + Gn - 2.0 * Bn
+            # Project the temporally normalized RGB trace onto the POS plane.
+            # The order matters: this is [[0, 1, -1], [-2, 1, 1]] @ [R, G, B].
+            S1 = Gn - Bn
+            S2 = Gn + Bn - 2.0 * Rn
 
             alpha = np.std(S1) / (np.std(S2) + 1e-9)
             pulse_window = S1 + alpha * S2
@@ -147,25 +156,24 @@ class SignalProcessor:
         self.b_buf.append(rgb_triple[2])
         self.times.append(timestamp)
 
-        # We keep data by time, not strict frame count
-        # Ensure we have at least 6 seconds of data
-        while len(self.times) > 10 and (self.times[-1] - self.times[0]) > (self.buffer_size / self.target_fps) + 1.0:
+        # Keep a fixed-duration, timestamped observation window.
+        target_duration = self.buffer_size / self.target_fps
+        while len(self.times) > 1 and (self.times[-1] - self.times[0]) > target_duration:
             self.r_buf.pop(0)
             self.g_buf.pop(0)
             self.b_buf.pop(0)
             self.times.pop(0)
 
         duration = self.times[-1] - self.times[0] if len(self.times) > 0 else 0
-        target_duration = self.buffer_size / self.target_fps
-
+        # A timestamped frame stream rarely lands on exactly 10.0 seconds once
+        # old samples are trimmed, so accept a nearly full analysis window.
         if duration < target_duration * 0.95:
-            progress = duration / target_duration
+            progress = min(duration / target_duration, 1.0)
             return False, 0.0, [], [], progress
 
-        # Compute POS on raw, un-interpolated RGB traces first
-        pulse_raw = self._pos_signal(self.r_buf, self.g_buf, self.b_buf)
-
-        # Now interpolate the 1D POS pulse to a strict target_fps grid
+        # Resample RGB first. POS's 1.6-second overlap-add window is specified
+        # in samples, so applying it to unevenly timed webcam samples changes
+        # its effective duration and biases the frequency estimate.
         t_start, t_end = self.times[0], self.times[-1]
         uniform_t = np.arange(t_start, t_end, 1.0 / self.target_fps)
         
@@ -173,9 +181,11 @@ class SignalProcessor:
             return False, 0.0, [], [], 0.0
 
         try:
-            pulse = interp1d(self.times, pulse_raw, kind='cubic', fill_value='extrapolate')(uniform_t)
+            interpolator = interp1d(self.times, np.column_stack((self.r_buf, self.g_buf, self.b_buf)), axis=0, kind='cubic')
         except ValueError:
-            pulse = interp1d(self.times, pulse_raw, kind='linear', fill_value='extrapolate')(uniform_t)
+            interpolator = interp1d(self.times, np.column_stack((self.r_buf, self.g_buf, self.b_buf)), axis=0, kind='linear')
+        uniform_rgb = interpolator(uniform_t)
+        pulse = self._pos_signal(uniform_rgb[:, 0], uniform_rgb[:, 1], uniform_rgb[:, 2])
 
         # Extract BPM robustly
         bpm, snr_db, sig_filtered, valid_freqs, valid_psd = self._extract_robust_bpm(pulse)
