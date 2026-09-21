@@ -6,9 +6,20 @@ from capture import CaptureSession
 async def handler(websocket):
     print("Client connected")
     queue = asyncio.Queue(maxsize=2)
+    cmd_queue = asyncio.Queue()
     session = CaptureSession()
-    capture_task = asyncio.create_task(session.run_loop(queue))
+    capture_task = asyncio.create_task(session.run_loop(queue, cmd_queue))
     
+    async def rx_task():
+        try:
+            async for message in websocket:
+                data = json.loads(message)
+                cmd_queue.put_nowait(data)
+        except Exception as e:
+            print(f"Rx error: {e}")
+
+    rx = asyncio.create_task(rx_task())
+
     try:
         while True:
             state = await queue.get()
@@ -21,6 +32,7 @@ async def handler(websocket):
         session.stop()
         if not capture_task.done():
             capture_task.cancel()
+        rx.cancel()
 
 async def main():
     async with websockets.serve(handler, "0.0.0.0", 8000):

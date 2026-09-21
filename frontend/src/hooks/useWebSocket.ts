@@ -69,16 +69,27 @@ export const useWebSocket = (url: string) => {
             addLog('Signal buffer full. First BPM computed.');
         }
         
-        if (data.is_ready && data.bpm > 0) {
-            const now = Date.now();
-            if (now - lastBpmLogTime.current > 2000) {
-                addLog(`BPM: ${data.bpm.toFixed(1)} | Confidence: ${data.confidence.toFixed(1)}%`);
-                lastBpmLogTime.current = now;
+        if (data.is_ready && data.results) {
+            const algo = data.config?.algorithm === 'ALL' ? 'POS' : data.config?.algorithm;
+            const res = (data.results as any)[algo];
+            
+            if (res && res.bpm > 0) {
+                const now = Date.now();
+                if (now - lastBpmLogTime.current > 2000) {
+                    addLog(`[${algo}] BPM: ${res.bpm.toFixed(1)} | Confidence: ${(res.confidence * 100).toFixed(1)}%`);
+                    lastBpmLogTime.current = now;
+                }
             }
         }
         
         prevDataRef.current = data;
     }, [data]);
 
-    return { data, connected, logs, addLog };
+    const sendMessage = (msg: any) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify(msg));
+        }
+    };
+
+    return { data, connected, logs, addLog, sendMessage };
 };

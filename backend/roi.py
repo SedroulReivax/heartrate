@@ -35,36 +35,39 @@ class FaceROIExtractor:
         landmarks = results.multi_face_landmarks[0]
         
         rois = []
-        r_sum = g_sum = b_sum = 0.0
-        pixel_count = 0
+        
+        mask = np.zeros((ih, iw), dtype=np.uint8)
         
         def extract_roi(indices):
-            nonlocal r_sum, g_sum, b_sum, pixel_count, rois
+            nonlocal rois
             
-            # Find bounding box for these landmarks
-            xs = [int(landmarks.landmark[idx].x * iw) for idx in indices]
-            ys = [int(landmarks.landmark[idx].y * ih) for idx in indices]
+            pts = np.array([[[int(landmarks.landmark[idx].x * iw), int(landmarks.landmark[idx].y * ih)] for idx in indices]], dtype=np.int32)
+            cv2.fillPoly(mask, pts, 255)
             
-            x_min, x_max = max(0, min(xs)), min(iw, max(xs))
-            y_min, y_max = max(0, min(ys)), min(ih, max(ys))
+            # Calculate bounding box for visualization
+            xs = pts[0, :, 0]
+            ys = pts[0, :, 1]
+            x_min, x_max = max(0, np.min(xs)), min(iw, np.max(xs))
+            y_min, y_max = max(0, np.min(ys)), min(ih, np.max(ys))
             
             w = x_max - x_min
             h = y_max - y_min
             
             if w > 0 and h > 0:
-                rois.append((x_min, y_min, w, h))
-                roi_region = frame[y_min:y_max, x_min:x_max]
-                b_sum += np.sum(roi_region[:, :, 0].astype(np.float64))
-                g_sum += np.sum(roi_region[:, :, 1].astype(np.float64))
-                r_sum += np.sum(roi_region[:, :, 2].astype(np.float64))
-                pixel_count += w * h
+                rois.append((int(x_min), int(y_min), int(w), int(h)))
         
         extract_roi(self.FOREHEAD_INDICES)
         extract_roi(self.LEFT_CHEEK_INDICES)
         extract_roi(self.RIGHT_CHEEK_INDICES)
         
+        roi_pixels = frame[mask == 255]
+        pixel_count = len(roi_pixels)
         if pixel_count == 0:
             return False, rois, (0.0, 0.0, 0.0)
             
+        b_sum = np.sum(roi_pixels[:, 0].astype(np.float64))
+        g_sum = np.sum(roi_pixels[:, 1].astype(np.float64))
+        r_sum = np.sum(roi_pixels[:, 2].astype(np.float64))
+        
         avg_rgb = (r_sum / pixel_count, g_sum / pixel_count, b_sum / pixel_count)
         return True, rois, avg_rgb
