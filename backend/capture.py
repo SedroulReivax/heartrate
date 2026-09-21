@@ -10,13 +10,14 @@ class CaptureSession:
     def __init__(self, fps=30):
         self.fps = fps
         # Default backend — MSMF works fine when only one instance holds the camera
-        self.cap = cv2.VideoCapture(0)
+        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
         self.cap.set(cv2.CAP_PROP_FPS, fps)
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
         
         # ATTEMPT TO DISABLE AUTO-EXPOSURE (0.25 usually means manual in MSMF/DSHOW)
         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+        self.cap.set(cv2.CAP_PROP_AUTO_WB, 0.0)
 
         # Use actual FPS reported by the driver (could be 15, 25, 30…)
         actual_fps = self.cap.get(cv2.CAP_PROP_FPS)
@@ -53,11 +54,12 @@ class CaptureSession:
                         print("Camera crashed. Hard restarting...")
                         self.cap.release()
                         await asyncio.sleep(0.5)
-                        self.cap = cv2.VideoCapture(0)
+                        self.cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
                         self.cap.set(cv2.CAP_PROP_FPS, self.fps)
                         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
                         self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
                         self.cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.25)
+                        self.cap.set(cv2.CAP_PROP_AUTO_WB, 0.0)
                         fail_count = 0
                     else:
                         await asyncio.sleep(0.05)

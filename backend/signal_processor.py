@@ -123,15 +123,14 @@ class SignalProcessor:
         best_freq = None
         window_hz = 0.1 # +/- 0.1 Hz window around peak
         
-        physio_mask = (freqs >= self.min_hz) & (freqs <= self.max_hz)
-        p_total = np.sum(psd[physio_mask])
+        p_total = np.sum(psd)
         
         for fc in candidate_freqs:
             mask_fundamental = (freqs >= (fc - window_hz)) & (freqs <= (fc + window_hz))
             mask_harmonic = (freqs >= (2*fc - window_hz)) & (freqs <= (2*fc + window_hz))
             
             signal_mask = mask_fundamental | mask_harmonic
-            p_signal = np.sum(psd[signal_mask & physio_mask])
+            p_signal = np.sum(psd[signal_mask])
             
             p_noise = p_total - p_signal
             p_noise = max(p_noise, 1e-10)
@@ -180,10 +179,7 @@ class SignalProcessor:
         if len(self.times) < 4:
             return False, 0.0, [], [], 0.0
 
-        try:
-            interpolator = interp1d(self.times, np.column_stack((self.r_buf, self.g_buf, self.b_buf)), axis=0, kind='cubic')
-        except ValueError:
-            interpolator = interp1d(self.times, np.column_stack((self.r_buf, self.g_buf, self.b_buf)), axis=0, kind='linear')
+        interpolator = interp1d(self.times, np.column_stack((self.r_buf, self.g_buf, self.b_buf)), axis=0, kind='linear')
         uniform_rgb = interpolator(uniform_t)
         pulse = self._pos_signal(uniform_rgb[:, 0], uniform_rgb[:, 1], uniform_rgb[:, 2])
 
